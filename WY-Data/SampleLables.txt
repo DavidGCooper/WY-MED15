@@ -1,0 +1,11 @@
+sample.id num.tech.reps strain
+LAB.A 1 LAB
+LAB.B 1 LAB
+med15.A 1 med15
+med15.B 1 med15
+WY7.A 1 WY7
+WY7.B 1 WY7
+WY15.A 1 WY15
+WY15.B 1 WY15
+WY23.A 1 WY23
+WY23.B 1 WY23

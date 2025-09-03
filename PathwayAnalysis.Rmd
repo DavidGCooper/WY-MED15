@@ -1,0 +1,251 @@
+---
+title: "WY RNA Seq"
+author: "David Cooper"
+date: "2025-03-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(DESeq2)
+library(pheatmap)
+library(fgsea)
+library(biomaRt)
+library(VennDiagram)
+library(gplots)
+source("read_cpdb_tab.R")
+
+```
+
+## Load DESeq Results and Pathway File
+
+```{r Load Data}
+med15res=read_tsv("WY-Data/Labmed15.tsv")
+WY7res=read_tsv("WY-Data/LabWY7.tsv")
+WY15res=read_tsv("WY-Data/LabWY15.tsv")
+WY23res=read_tsv("WY-Data/LabWY23.tsv")
+CountTable=read.table("WY-Data/FeatureCounts.txt",header = TRUE,row.names = 1)
+logCountTable=log2(CountTable)
+
+pathwayDB=read_cpdb_tab("CPDB_pathways_genes.tab")
+
+```
+
+## Prepare Stat Objects and Run fgsea
+
+```{r GSEA}
+set.seed(123)
+
+#LAB vs med15
+med15Stat=med15res$stat
+names(med15Stat)=med15res$gene
+
+med15GSEA=fgsea(pathways = pathwayDB,
+                  stats = med15Stat,
+                  minSize = 5, nPermSimple=10000)
+saveRDS(med15GSEA,"GSEA/med15GSEA.rds")
+
+#LAB vs WY7
+WY7Stat=WY7res$stat
+names(WY7Stat)=WY7res$gene
+
+WY7GSEA=fgsea(pathways = pathwayDB,
+                  stats = WY7Stat,
+                  minSize = 5, nPermSimple=10000)
+saveRDS(WY7GSEA,"GSEA/WY7GSEA.rds")
+
+#LAB vs WY15
+WY15Stat=WY15res$stat
+names(WY15Stat)=WY15res$gene
+
+WY15GSEA=fgsea(pathways = pathwayDB,
+                  stats = WY15Stat,
+                  minSize = 5, nPermSimple=10000)
+saveRDS(WY15GSEA,"GSEA/WY15GSEA.rds")
+
+#LAB vs WY23
+WY23Stat=WY23res$stat
+names(WY23Stat)=WY23res$gene
+
+WY23GSEA=fgsea(pathways = pathwayDB,
+                  stats = WY23Stat,
+                  minSize = 5, nPermSimple=10000)
+saveRDS(WY23GSEA,"GSEA/WY23GSEA.rds")
+
+```
+
+```{r Write Files}
+med15GSEA=readRDS("GSEA/med15GSEA.rds")
+#write_tsv(med15GSEA[,1:7],"GSEA/med15GSEA.tsv")
+
+WY7GSEA=readRDS("GSEA/WY7GSEA.rds")
+#write_tsv(WY7GSEA[,1:7],"GSEA/WY7GSEA.tsv")
+
+WY15GSEA=readRDS("GSEA/WY15GSEA.rds")
+#write_tsv(WY15GSEA[,1:7],"GSEA/WY15GSEA.tsv")
+
+WY23GSEA=readRDS("GSEA/WY23GSEA.rds")
+#write_tsv(WY23GSEA[,1:7],"GSEA/WY23GSEA.tsv")
+
+```
+
+## Create Venn Diagram for Overlapping Pathways
+
+```{r Venn Diagram}
+SigPathList=list(med15=med15GSEA[med15GSEA$padj<0.01,]$pathway,
+                 WY7=WY7GSEA[WY7GSEA$padj<0.01,]$pathway,
+                 WY15=WY15GSEA[WY15GSEA$padj<0.01,]$pathway,
+                 WY23=WY23GSEA[WY23GSEA$padj<0.01,]$pathway)
+
+venn.diagram(SigPathList,
+             euler.d = FALSE, scaled=FALSE, 
+             category=c("med15","WY7","WY15","WY23"),
+             fill=c(alpha("#21B0FE",0.4),alpha("#FED700",0.4),alpha("#FE218B",0.4),alpha("purple",0.4)), 
+             col=c("#21B0FE","#FED700","#FE218B","purple"),
+             lty=rep("solid", 4), 
+             cex=2, 
+             cat.cex=2,
+             cat.dist=c(0.22,0.22,0.1,0.1),
+             margin=0.1,
+             disable.logging=TRUE,
+             cat.col=c("#21B0FE","#FED700","#FE218B","purple"),
+             filename = "GSEA/Pathway_Venn.tiff")
+
+ItemsList=venn(SigPathList, show.plot = FALSE)
+lengths(attributes(ItemsList)$intersections)
+sink("GSEA/PathwayVennCategories.txt"); print(attributes(ItemsList)$intersections); sink()
+
+```
+
+## Create Heatmaps for Genes in Select Significant Pathways
+
+```{r Heatmaps}
+ensembl=useEnsembl(biomart="genes",dataset = "scerevisiae_gene_ensembl")
+YeastHomologGeneList=getBM(mart=ensembl,attributes=c("ensembl_gene_id","external_gene_name"))
+
+ArgPathGenes=pathwayDB$`arginine biosynthesis | YeastCyc`
+ArgPathCounts=logCountTable[rownames(logCountTable) %in% ArgPathGenes,]
+ArgPathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(ArgPathCounts),YeastHomologGeneList$ensembl_gene_id)]
+rownames(ArgPathCounts)=ArgPathCounts$GeneNames
+
+#Scale by Row sets the average for that row to 0 to highlight increases and decreases
+pheatmap(log2(ArgPathCounts[,-11]),#scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         main = "Arginine biosynthesis",
+         filename = "GSEA/PathwayHeatmaps/ArgPathHeatmap.tiff")
+
+
+PathGenes=pathwayDB$`superpathway of leucine, valine, and isoleucine biosynthesis | YeastCyc`
+PathCounts=logCountTable[rownames(logCountTable) %in% PathGenes,]
+PathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(PathCounts),YeastHomologGeneList$ensembl_gene_id)]
+rownames(PathCounts)=PathCounts$GeneNames
+
+pheatmap(PathCounts[,-11],scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         main = "AA biosynthesis (Leu, Val, Iso)",
+         filename = "GSEA/PathwayHeatmaps/LeuValIsoSuperPathHeatmap.tiff")
+
+
+PathGenes=pathwayDB$`The citric acid (TCA) cycle and respiratory electron transport | Reactom`
+PathCounts=logCountTable[rownames(logCountTable) %in% PathGenes,]
+PathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(PathCounts),YeastHomologGeneList$ensembl_gene_id)]
+rownames(PathCounts)=PathCounts$GeneNames
+
+pheatmap(PathCounts[1:49,-11],scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         main = "TCA and ETC",
+         filename = "GSEA/PathwayHeatmaps/TCAandETCPathHeatmap.tiff")
+
+
+PathGenes=pathwayDB$`urea cycle | YeastCyc`
+PathCounts=logCountTable[rownames(logCountTable) %in% PathGenes,]
+PathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(PathCounts),YeastHomologGeneList$ensembl_gene_id)]
+rownames(PathCounts)=PathCounts$GeneNames
+
+pheatmap(PathCounts[,-11],scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         main = "Urea Cycle",
+         filename = "GSEA/PathwayHeatmaps/UreaCyclePathHeatmap.tiff")
+
+
+PathGenes=pathwayDB$`superpathway of sulfur amino acid biosynthesis (<i>Saccharomyces cerevisiae</i>) | YeastCyc`
+PathCounts=logCountTable[rownames(logCountTable) %in% PathGenes,]
+PathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(PathCounts),YeastHomologGeneList$ensembl_gene_id)]
+rownames(PathCounts)=PathCounts$GeneNames
+
+pheatmap(PathCounts[-12,-11],scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         main = "Sulfur Amino Acid metabolism",
+         filename = "GSEA/PathwayHeatmaps/SulfurAAPathHeatmap.tiff")
+
+
+PathGenes=pathwayDB$`Eukaryotic Translation Initiation | Reactome`
+PathCounts=logCountTable[rownames(logCountTable) %in% PathGenes,]
+PathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(PathCounts),YeastHomologGeneList$ensembl_gene_id)]
+rownames(PathCounts)=PathCounts$GeneNames
+
+pheatmap(PathCounts[,-11],scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         show_rownames = FALSE, 
+         main = "Translation Initiation",
+         filename = "GSEA/PathwayHeatmaps/TranslationPathHeatmap.tiff")
+
+
+PathGenes=pathwayDB$`Glucose metabolism | Reactome`
+PathCounts=logCountTable[rownames(logCountTable) %in% PathGenes,]
+PathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(PathCounts),YeastHomologGeneList$ensembl_gene_id)]
+PathCounts=PathCounts[!PathCounts$GeneNames=="",]
+rownames(PathCounts)=PathCounts$GeneNames
+
+pheatmap(PathCounts[c(-28,-29),-11],scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         main = "Glucose metabolism",
+         filename = "GSEA/PathwayHeatmaps/GlucosePathHeatmap.tiff")
+
+
+PathGenes=pathwayDB$`Pyruvate metabolism | Reactome`
+PathCounts=logCountTable[rownames(logCountTable) %in% PathGenes,]
+PathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(PathCounts),YeastHomologGeneList$ensembl_gene_id)]
+rownames(PathCounts)=PathCounts$GeneNames
+
+pheatmap(PathCounts[,-11],scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         main = "Pyruvate metabolism",
+         filename = "GSEA/PathwayHeatmaps/PyruvatePathHeatmap.tiff")
+
+
+PathGenes=c(pathwayDB$`Phenylalanine, tyrosine and tryptophan biosynthesis - Saccharomyces cerevisiae (budding yeast) | KEGG`,
+            pathwayDB$`Glycine, serine and threonine metabolism - Saccharomyces cerevisiae (budding yeast) | KEGG`)
+PathCounts=logCountTable[rownames(logCountTable) %in% PathGenes,]
+PathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(PathCounts),YeastHomologGeneList$ensembl_gene_id)]
+rownames(PathCounts)=PathCounts$GeneNames
+
+pheatmap(PathCounts[-42,-11],scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         main = "AA biosynthesis (Gly, Ser, Thr, Phe, Tyr, Trp)",
+         filename = "GSEA/PathwayHeatmaps/GSTPYW-AAPathHeatmap.tiff")
+
+
+PathGenes=c(pathwayDB$`Lysine biosynthesis - Saccharomyces cerevisiae (budding yeast) | KEGG`)
+PathCounts=logCountTable[rownames(logCountTable) %in% PathGenes,]
+PathCounts$GeneNames=YeastHomologGeneList$external_gene_name[match(rownames(PathCounts),YeastHomologGeneList$ensembl_gene_id)]
+rownames(PathCounts)=PathCounts$GeneNames
+
+pheatmap(PathCounts[-1,-11],scale = "row",
+         cluster_cols = FALSE,
+         height = 4,border_color = "black",
+         main = "Lysine biosynthesis",
+         filename = "GSEA/PathwayHeatmaps/LysPathHeatmap.tiff")
+
+```
+

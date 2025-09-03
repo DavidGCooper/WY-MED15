@@ -1,0 +1,94 @@
+---
+title: "MicroarrayAnalysis"
+author: "David Cooper"
+date: "2025-05-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(GEOquery)
+library(biomaRt)
+library(limma)
+
+```
+
+## Define Gene List
+Determine differential expression of curated gene list across studies
+
+```{r}
+ensembl=useEnsembl(biomart="genes",dataset = "scerevisiae_gene_ensembl")
+YeastHomologGeneList=getBM(mart=ensembl,attributes=c("ensembl_gene_id","external_gene_name"))
+
+GeneList=c("GUT1","ALD6","BAT2","PTR2","ADH1",
+"ADH3","ADH4","ADH5","ALD2","ALD3","ALD4",
+"ALD5","ACS1","ACS2","PDA1","PDB1","PDC1",
+"PDC6","ARO10","ATF2","ADH2","FPS1","GPD1",
+"IRC7","LEU4","MAL12","MAL32","MET10")
+
+```
+
+## GSE4654 
+med15 is GSM104874
+
+```{r Load Data}
+GSE4654=getGEO("GSE4654")
+GSE4654=GSE4654[[1]]
+GSE4654=GSE4654[,GSE4654@phenoData@data$geo_accession=="GSM104874"]
+GSE=as.data.frame(exprs(GSE4654))
+GSE$Gene=YeastHomologGeneList$external_gene_name[match(rownames(GSE),YeastHomologGeneList$ensembl_gene_id)]
+
+view(GSE[GSE$Gene %in% GeneList,])
+
+```
+
+## GSE42528 (GSE42527)
+GEO file is large with 2600+ samples
+med15 is GSM636476 and GSM636477
+platform is GPL11232
+
+```{r}
+GSM636476=getGEO("GSM636476")
+GSM636477=getGEO("GSM636477")
+GPL11232=getGEO("GPL11232")
+
+eGSE42527=data.frame(ID=GSM636476@dataTable@table$ID_REF,
+                     GSM636476=GSM636476@dataTable@table$VALUE,
+                     GSM636477=GSM636477@dataTable@table$VALUE)
+eGSE42527$Gene=GPL11232@dataTable@table$GENE_SYMBOL[match(eGSE42527$ID,GPL11232@dataTable@table$ID)]
+eGSE42527$Avg=rowMeans(eGSE42527[,2:3])
+
+Temp=eGSE42527%>%arrange(desc(Avg))%>%filter(!duplicated(Gene))
+
+view(Temp[Temp$Gene %in% GeneList,])
+
+```
+
+## GSE31774
+Fold change data downloaded using getGEOSuppFiles("GSE31774")
+Analyze using data as provided (not independently normalized)
+
+```{r}
+GSE31774=read_tsv("Microarray-Data/GSE31774_fold_change_data.txt")
+
+GSE31774=getGEO("GSE31774")[[1]]
+#boxplot(exprs(GSE31774))
+
+
+Design=model.matrix(~0+as.factor(GSE31774@phenoData@data$source_name_ch1))
+colnames(Design)=c("myc_CSM","myc_YPD","del_CSM","del_YPD","WT_CSM","WT_YPD")
+rownames(Design)=GSE31774@phenoData@data$geo_accession
+fit=lmFit(GSE31774,Design)
+contrasts_GSE31774 <- makeContrasts(del_YPD - WT_YPD,levels = Design)
+fit2=contrasts.fit(fit,contrasts_GSE31774)
+fit2=eBayes(fit2)
+
+de_GSE31774=topTable(fit2,coef = "del_YPD - WT_YPD",number = Inf)
+
+de_GSE31774_Filter=de_GSE31774%>%arrange(desc(AveExpr))%>%filter(!duplicated(ORF))
+
+view(de_GSE31774_Filter[de_GSE31774_Filter$Gene.Symbol %in% GeneList,c(2,11,17)])
+
+```
+
